@@ -1,0 +1,156 @@
+---
+title: "Coursera PML Project"
+author: "Lucas J. Castro"
+date: "21 de septiembre de 2014"
+output: html_document
+---
+
+#Human Activity Recognition
+
+##Summary
+Based on wearables devices such as Fitbit and Nike Fuelband, and thanks to their multiple sensors, we can collect a large amount of data about the activities a person can do in her personal day.
+
+Analyzing this data, we can recognizes what activity is doing a concrete individual. In this study, we create different machine learning models in order to predict this activity, based on the collected data of various subjects performing this activities.
+
+
+##Processing Data
+
+```{r}
+library(corrplot)
+library(caret)
+library(rattle)
+```
+
+###Loading data
+For this study, we have a training and testing data sets, both provided by the **Practical Machine Learning Course**, offered by the Johns Hopkins School of Public Health at the Coursera Platform.
+
+First, we load the data sets, taking care of the null values in many of their columns:
+```{r cache=TRUE}
+train <- read.csv("pml-training.csv",header = TRUE,
+                  stringsAsFactors=FALSE,
+                  na.strings=c("NA","NaN"," ","#DIV/0!"))
+test <- read.csv("pml-testing.csv",header = TRUE,
+                 stringsAsFactors=FALSE,
+                 na.strings=c("NA","NaN"," ","#DIV/0!"))
+```
+
+Both data sets contains 160 variables, but for the training set we have 19622 observations, and for the testing set we have 20.
+
+###Processing and Cleaning data
+Exploring the training set, we can see that there are many NA values on different columns, analyzing this, we think that these columns are not relevants for our study, so we create a filter ir order to collect the most complete variables, resulting in a filtered data set with only 59 variables of the 160 initially loaded.
+
+In addition to this, we remove the first variable, because it is a numerical id of the row, and we convert to factors the **classe** variable in the training set, and the **problem_id** in the testing set.
+
+
+```{r cache=TRUE}
+train <- train[,-1]
+test <- test [,-1]
+
+train$classe <- as.factor(train$classe)
+test$problem_id <- as.factor(test$problem_id)
+
+train.filter <- train[,colSums(is.na(train)) < 15000]
+```
+
+###Explore correlations
+For a more highly accurated model, we analyze the correlations between variables, in order to exclude the most correlated, using a cut filter of 0.70.
+
+The first figure is a plot of all the variable correlations, ordered in hclust, and the second figure only shows the resulting filter of the training data set, from 59 to 37 final variables.
+
+```{r}
+corrTrain <- cor(train.filter[,6:58])
+
+par(mfrow=c(1,1))
+corrplot(cor(train.filter[,6:58]), order="hclust")
+
+highlyCor <- findCorrelation(corrTrain,0.70)
+trainFinal <- train.filter[,-highlyCor]
+corrplot(cor(trainFinal[,2:36]), order="hclust")
+```
+
+
+##Machine Learning Models
+Based on nature of the problem, we use three different models in order to classify and predict test data.
+
+First, we train a Recursive Partitioning and Regression Tree (RPART) model, but as we can see is a poorly model with this data set, so secondly we create a Gradient Boosting Machine (GBM) model, and a third model based on Random Forest, all of these with the **caret** package. 
+
+
+###Training and testing sets
+With the original training data, we create two new data sets, one to train the model (using 75% of the original data), and a second to test this model (with the rest 25%).
+
+```{r cache=TRUE}
+inTrain <- createDataPartition(trainFinal$classe,p=0.75,list=FALSE)
+dsTrain <- trainFinal[inTrain,]
+dsTest <- trainFinal[-inTrain,]
+```
+
+
+###Recursive Partitioning and Regression Trees
+Using the newly created training data set, we train a RPART model, with default configuration values, and plot the final model.
+
+```{r cache=TRUE}
+set.seed(7337)
+modTree <- train(classe ~ . -user_name,data=dsTrain, method="rpart")
+fancyRpartPlot(modTree$finalModel)
+```
+
+We use this model to predict the data with the testing set, and as we can see in the confusion matrix, these predictions are really poor.
+
+```{r}
+predTree <- predict(modTree,dsTest)
+confusionMatrix(dsTest$classe,predTree)
+```
+
+
+###Gradient Boosting Machine
+We train a GBM model using a 10-fold Cross Validation, with five iterations. As we can see, this model performs very well with the training data, with a 98,7 % of accuracy, using 150 trees and 3 interaction depth.
+
+```{r cache=TRUE, results='hide'}
+set.seed(7337)
+fitControl <- trainControl(method="cv",number=10,repeats=5,verboseIter=TRUE)
+modGBM <- train(classe ~ . -user_name,data=dsTrain, method="gbm",trControl = fitControl)
+modGBM
+```
+
+Now, we predict the train and test data set using this model, and construct the confusion matrix of both predictions.
+
+```{r}
+predTrainGBM <- predict(modGBM,dsTrain)
+predTestGBM <- predict(modGBM,dsTest)
+
+confusionMatrix(dsTrain$classe,predTrainGBM)
+confusionMatrix(dsTest$classe,predTestGBM)
+```
+
+We can see that the errors in the training predictions are only of 0.78 %, and the errors of the out of sample in the test predictions are of 1.28 %, so we think that this is the model we use to predict the test data set provided for the assignment.
+
+```{r}
+predict(modGBM,test)
+```
+
+###Random Forest
+As we commented above, we create a third model using Random Forest, using the same fit controls of the GBM model, 10-fold Cross Validation with 5 repeats.
+
+```{r cache=TRUE, results='hide', eval=FALSE}
+set.seed(7337)
+modRF <- train(classe ~ . -user_name,data=dsTrain, method="rf", trControl = fitControl)
+modRF
+```
+
+The problem we see in this model is that it produces a perfect fit on the training set, a 100 % of accuracy, so we think that this model is probably overfitting the predictions.
+
+```{r eval=FALSE}
+predRFTrain <- predict(modRF,dsTrain)
+predRFTest <- predict(modRF,dsTest)
+
+cmTrainRF <- confusionMatrix(dsTrain$classe,predRFTrain)
+cmTestRF <- confusionMatrix(dsTest$classe,predRFTest)
+```
+
+
+##Conclusions
+
+We conclude in this study that choosing the right features for our model, and of course, choose a correct model for this classification problem, are key components for the correct resolution of the problem.
+
+As we can see in this analysis, Gradient Boosting Machine (or Stochastic Gradient Boosting) performs very well with the data (99.2%) and has a highly accurated predictions on the testing set (98.72%), resulting in the perfect model for this analysis.
+
